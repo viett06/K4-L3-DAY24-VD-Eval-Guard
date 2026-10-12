@@ -3,6 +3,7 @@ from __future__ import annotations
 """Phase A: RAGAS Production Evaluation — 50q, 3 distributions, cluster analysis."""
 
 import json
+import math
 import os
 import sys
 from dataclasses import asdict, dataclass
@@ -108,134 +109,110 @@ def save_phase_a_report(results: list[RagasResult], clusters: dict, bottom: list
 
 # ─── Tasks 1-4: Sinh viên implement ──────────────────────────────────────────
 
-def group_by_distribution(test_set: list[dict]) -> dict[str, list[dict]]:
-    """Task 1: Nhóm 50 câu hỏi theo 3 distributions.
+def _metric(record, name: str) -> float:
+    value = record[name] if isinstance(record, dict) else getattr(record, name)
+    number = float(value)
+    if not math.isfinite(number) or not 0.0 <= number <= 1.0:
+        raise ValueError(f"{name} is not a finite score in [0, 1]")
+    return number
 
-    Returns:
-        {"factual": [...], "multi_hop": [...], "adversarial": [...]}
-    """
-    # TODO: Implement
-    # groups = {"factual": [], "multi_hop": [], "adversarial": []}
-    # for item in test_set:
-    #     groups[item["distribution"]].append(item)
-    # return groups
-    return {"factual": [], "multi_hop": [], "adversarial": []}
+
+def group_by_distribution(test_set: list[dict]) -> dict[str, list[dict]]:
+    """Task 1: Nhóm 50 câu hỏi theo 3 distributions."""
+    groups = {"factual": [], "multi_hop": [], "adversarial": []}
+    for item in test_set:
+        groups[item["distribution"]].append(item)
+    return groups
 
 
 def run_ragas_50q(answers: list[dict]) -> RagasEvaluation:
-    """Task 2: Chạy RAGAS 4 metrics trên toàn bộ 50 câu hỏi.
-
-    Gợi ý — import từ Day 18 của bạn:
+    """Task 2: Chạy RAGAS 4 metrics trên toàn bộ 50 câu hỏi."""
+    try:
         from src.m4_eval import evaluate_ragas
+    except ImportError as exc:
+        raise ValueError("Missing m4 evaluator; cannot declare its actual models") from exc
 
-    Steps:
-        1. Extract questions, answers, contexts, ground_truths từ answers list
-        2. Gọi evaluate_ragas() từ m4_eval.py
-        3. Kết hợp kết quả với distribution info từ answers list
-        4. Return RagasEvaluation(results, raw["metadata"]["evaluator_models"])
-           m4 must report its actual LLM/embedding models; never guess JUDGE_MODEL.
-    """
-    # TODO: Implement
-    # try:
-    #     from src.m4_eval import evaluate_ragas
-    # except ImportError:
-    #     print("⚠️  Không tìm thấy src/m4_eval.py — đã copy từ Day 18 chưa?")
-    #     raise ValueError("Missing m4 evaluator; cannot declare its actual models")
-    #
-    # questions     = [a["question"]    for a in answers]
-    # ans_texts     = [a["answer"]      for a in answers]
-    # contexts      = [a["contexts"]    for a in answers]
-    # ground_truths = [a["ground_truth"] for a in answers]
-    #
-    # raw = evaluate_ragas(questions, ans_texts, contexts, ground_truths)
-    # per_q = raw.get("per_question", [])
-    #
-    # results = []
-    # for a, pq in zip(answers, per_q):
-    #     results.append(RagasResult(
-    #         question_id=a["id"], distribution=a["distribution"],
-    #         question=a["question"], answer=a["answer"],
-    #         contexts=a["contexts"], ground_truth=a["ground_truth"],
-    #         faithfulness=float(pq.faithfulness), answer_relevancy=float(pq.answer_relevancy),
-    #         context_precision=float(pq.context_precision), context_recall=float(pq.context_recall),
-    #     ))
-    # return RagasEvaluation(results, raw["metadata"]["evaluator_models"])
-    return RagasEvaluation([], [])
+    questions = [a["question"] for a in answers]
+    ans_texts = [a["answer"] for a in answers]
+    contexts = [a["contexts"] for a in answers]
+    ground_truths = [a["ground_truth"] for a in answers]
+    raw = evaluate_ragas(questions, ans_texts, contexts, ground_truths)
+    per_q = raw.get("per_question", [])
+    if len(per_q) != len(answers):
+        raise ValueError("m4 per_question length does not match answers")
+    models = raw.get("metadata", {}).get("evaluator_models")
+    if not isinstance(models, list) or not models:
+        raise ValueError("m4 must report actual evaluator models")
+
+    results = []
+    for answer, metrics in zip(answers, per_q):
+        results.append(RagasResult(
+            question_id=answer["id"],
+            distribution=answer["distribution"],
+            question=answer["question"],
+            answer=answer["answer"],
+            contexts=answer["contexts"],
+            ground_truth=answer["ground_truth"],
+            faithfulness=_metric(metrics, "faithfulness"),
+            answer_relevancy=_metric(metrics, "answer_relevancy"),
+            context_precision=_metric(metrics, "context_precision"),
+            context_recall=_metric(metrics, "context_recall"),
+        ))
+    return RagasEvaluation(results, list(models))
 
 
 def bottom_10(results: list[RagasResult]) -> list[dict]:
-    """Task 3: Lấy 10 câu hỏi có avg_score thấp nhất.
-
-    Returns:
-        [{"rank": 1, "question_id": ..., "distribution": ...,
-          "question": ..., "avg_score": ..., "worst_metric": ...,
-          "diagnosis": ..., "suggested_fix": ...}, ...]
-    """
-    # TODO: Implement
-    # sorted_asc = sorted(results, key=lambda r: r.avg_score)
-    # bottom = sorted_asc[:10]
-    # output = []
-    # for i, r in enumerate(bottom):
-    #     diag, fix = DIAGNOSTIC_TREE[r.worst_metric]
-    #     output.append({
-    #         "rank": i + 1,
-    #         "question_id": r.question_id,
-    #         "distribution": r.distribution,
-    #         "question": r.question,
-    #         "avg_score": round(r.avg_score, 4),
-    #         "worst_metric": r.worst_metric,
-    #         "diagnosis": diag,
-    #         "suggested_fix": fix,
-    #     })
-    # return output
-    return []
+    """Task 3: Lấy tối đa 10 câu có avg_score thấp nhất, xếp tăng dần."""
+    ordered = sorted(results, key=lambda row: (row.avg_score, row.question_id))
+    output = []
+    for rank, row in enumerate(ordered[:10], start=1):
+        diagnosis, suggested_fix = DIAGNOSTIC_TREE[row.worst_metric]
+        output.append({
+            "rank": rank,
+            "question_id": row.question_id,
+            "distribution": row.distribution,
+            "question": row.question,
+            "avg_score": round(row.avg_score, 4),
+            "worst_metric": row.worst_metric,
+            "diagnosis": diagnosis,
+            "suggested_fix": suggested_fix,
+        })
+    return output
 
 
 def cluster_analysis(results: list[RagasResult]) -> dict:
-    """Task 4: Phân tích failure clusters theo (worst_metric × distribution).
+    """Task 4: Đếm worst_metric của mọi câu và chọn nhóm có mean thấp nhất."""
+    matrix = {
+        metric: {"factual": 0, "multi_hop": 0, "adversarial": 0}
+        for metric in DIAGNOSTIC_TREE
+    }
+    for row in results:
+        matrix[row.worst_metric][row.distribution] += 1
 
-    Matrix thống kê worst_metric của mọi câu, không coi mọi câu là một failure.
-    Nhóm yếu nhất = distribution có avg_score trung bình thấp nhất (bỏ nhóm rỗng).
-    Tổng matrix theo cột chỉ là kích thước nhóm 20/20/10, không đo chất lượng.
-
-    Returns:
-        {
-          "matrix": {
-            "faithfulness":      {"factual": 3, "multi_hop": 5, "adversarial": 2},
-            "answer_relevancy":  {...},
-            "context_precision": {...},
-            "context_recall":    {...},
-          },
-          "dominant_failure_distribution": "multi_hop",
-          "dominant_failure_metric": "context_recall",
-          "insight": "..."
-        }
-    """
-    # TODO: Implement
-    # matrix = {
-    #     metric: {"factual": 0, "multi_hop": 0, "adversarial": 0}
-    #     for metric in DIAGNOSTIC_TREE
-    # }
-    # for r in results:
-    #     matrix[r.worst_metric][r.distribution] += 1
-    #
-    # # Find dominant failure
-    # means = {
-    #     d: sum(r.avg_score for r in results if r.distribution == d) /
-    #        sum(r.distribution == d for r in results)
-    #     for d in ("factual", "multi_hop", "adversarial")
-    #     if any(r.distribution == d for r in results)
-    # }
-    # dominant_dist = min(means, key=means.get)  # lowest quality, NOT largest group
-    # dominant_metric = max(matrix, key=lambda m: sum(matrix[m].values()))
-    # insight = (f"Distribution '{dominant_dist}' có điểm trung bình thấp nhất. "
-    #            f"Metric '{dominant_metric}' là điểm yếu chủ đạo. "
-    #            f"Gợi ý: {DIAGNOSTIC_TREE[dominant_metric][1]}")
-    #
-    # return {"matrix": matrix, "distribution_avg_scores": means,
-    #         "dominant_failure_distribution": dominant_dist,
-    #         "dominant_failure_metric": dominant_metric, "insight": insight}
-    return {}
+    means = {}
+    for distribution in ("factual", "multi_hop", "adversarial"):
+        subset = [row for row in results if row.distribution == distribution]
+        if subset:
+            means[distribution] = sum(row.avg_score for row in subset) / len(subset)
+    if not means:
+        raise ValueError("cluster_analysis needs at least one result")
+    dominant_dist = min(means, key=means.get)
+    dominant_metric = max(matrix, key=lambda metric: sum(matrix[metric].values()))
+    diagnosis, suggested_fix = DIAGNOSTIC_TREE[dominant_metric]
+    insight = (
+        f"Distribution '{dominant_dist}' có điểm trung bình thấp nhất "
+        f"({means[dominant_dist]:.4f}). Metric '{dominant_metric}' là worst_metric "
+        f"xuất hiện nhiều nhất. Chẩn đoán: {diagnosis}. Gợi ý: {suggested_fix}."
+    )
+    report = {
+        "matrix": matrix,
+        "dominant_failure_distribution": dominant_dist,
+        "dominant_failure_metric": dominant_metric,
+        "insight": insight,
+    }
+    if set(means) == {"factual", "multi_hop", "adversarial"}:
+        report["distribution_avg_scores"] = means
+    return report
 
 
 # ─── Main ─────────────────────────────────────────────────────────────────────

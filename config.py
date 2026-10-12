@@ -9,6 +9,19 @@ load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 HF_TOKEN = os.getenv("HF_TOKEN", "")  # Optional: for HuggingFace models
 
+# OpenRouter keys are OpenAI-compatible but are not accepted by api.openai.com.
+if OPENAI_API_KEY.startswith("sk-or-") and not os.getenv("OPENAI_BASE_URL"):
+    os.environ["OPENAI_BASE_URL"] = "https://openrouter.ai/api/v1"
+    os.environ["OPENAI_API_BASE"] = "https://openrouter.ai/api/v1"
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "")
+
+
+def resolve_chat_model(model: str) -> str:
+    """Map a bare OpenAI model id to the provider that holds the configured key."""
+    if "openrouter.ai" in OPENAI_BASE_URL and "/" not in model:
+        return f"openai/{model}"
+    return model
+
 # --- Qdrant (same as Day 18) ---
 QDRANT_HOST = "localhost"
 QDRANT_PORT = 6333

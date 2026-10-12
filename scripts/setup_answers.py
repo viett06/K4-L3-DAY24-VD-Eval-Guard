@@ -19,7 +19,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import ROOT_DIR, TEST_SET_PATH, ANSWERS_PATH, GENERATION_MODEL
+from config import ROOT_DIR, TEST_SET_PATH, ANSWERS_PATH, GENERATION_MODEL, resolve_chat_model
 
 
 def check_day18_files() -> bool:
@@ -97,11 +97,12 @@ def run_query(q: str, search, reranker, top_k: int, client=None) -> tuple[str, l
                 client = OpenAI()
             ctx = "\n\n".join(contexts)
             resp = client.chat.completions.create(
-                model=GENERATION_MODEL,
+                model=resolve_chat_model(GENERATION_MODEL),
                 messages=[
                     {"role": "system", "content": "Trả lời CHỈ dựa trên context. Nếu không có → nói 'Không tìm thấy.'"},
                     {"role": "user",   "content": f"Context:\n{ctx}\n\nCâu hỏi: {q}"},
                 ],
+                max_tokens=400,
             )
             reported_model = getattr(resp, "model", None)
             used_model = reported_model if isinstance(reported_model, str) and reported_model.strip() else GENERATION_MODEL
