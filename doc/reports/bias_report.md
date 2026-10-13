@@ -1,40 +1,48 @@
 # Đánh giá LLM Judge Phase B
 
-Nhóm: {{Tên nhóm}}
+Nhóm: VD
 
-Người phụ trách: {{Họ tên và MSSV}}
+Người phụ trách: Nguyễn Quang Duy, MSSV 2A202602426
 
-Nguồn: `artifacts/judge_results.json`; run timestamp: {{created_at}}.
-Models generation/judge: {{metadata.models.generation và metadata.models.judge}}.
+Nguồn dự kiến: `artifacts/judge_results.json`. Batch live chưa chạy vì API key
+được cung cấp đã hết hạn, nên chưa có timestamp hoặc metadata model judge từ một
+lượt chạy thành công. Generation source hiện có dùng `openai/gpt-4o-mini` theo
+`artifacts/answers_50q.json`.
 
 ## Năm cặp A/B và hai lượt
 
-Nguồn cố định: A từ artifacts/answers_50q.json:answer; B từ
-fixtures/human_labels_10q.json:model_answer; reference từ fixtures/test_set_50q.json:ground_truth.
-Ids: 1, 5, 12, 21, 41. Không đổi nguồn sau khi xem kết quả judge.
+Source code đã cố định đúng nguồn theo đề: A từ
+`artifacts/answers_50q.json:answer`; B từ
+`fixtures/human_labels_10q.json:model_answer`; reference từ
+`fixtures/test_set_50q.json:ground_truth`. Các id là 1, 5, 12, 21 và 41.
 
-{{Điền 5 rows: id, candidate A/B, winner_pass1, winner_pass2 đã quy về A/B gốc,
-final_winner, position_consistent, reasoning và scores của hai lượt.}}
+`swap_and_average` gọi judge hai lần theo thứ tự A/B rồi B/A, quy đổi winner và
+scores của lượt hai về A/B gốc. Kết quả chỉ được xem là decisive khi hai lượt
+đồng thuận; trường hợp không đồng thuận trở thành `tie`. Unit tests đã xác nhận
+thứ tự lời gọi, phép đổi winner, phép đổi scores và consensus.
 
-Position bias count/rate: {{count và rate}}.
-Verbosity win rate: {{giá trị}}; decisive cases: {{số lượng}}.
-
-{{Giải thích các case không nhất quán và các winner dài hơn. Phân biệt dấu hiệu
-thống kê với kết luận nguyên nhân bias dựa trên nội dung.}}
+Chưa có năm rows live nên position bias count/rate, verbosity win rate và số
+decisive cases đều chưa đo. Không suy luận các giá trị này từ unit tests hoặc tự
+điền số nhằm vượt checker.
 
 ## Calibration đúng model_answer
 
-Helper đánh giá đúng question/model_answer đang có trong fixtures/human_labels_10q.json;
-không lấy answer mới của pipeline. Prompt chỉ nhận question, answer, reference.
-Không gửi human_label, human_note hoặc phân bố nhãn human vào prompt.
+Runner gửi đúng `question`, `model_answer` và reference cho helper nhị phân;
+`human_label` và `human_note` chỉ được đọc sau khi judge trả kết quả. Hàm
+`cohen_kappa` kiểm tra hai danh sách có cùng độ dài, chỉ nhận integer 0/1, tính
+observed agreement và chance agreement, đồng thời xử lý trường hợp đồng thuận
+hằng một cách xác định.
 
-{{Điền 10 rows theo đúng thứ tự JSON: question_id, model_answer gốc, nhãn judge
-0/1, reasoning, human_label và agree. Nhãn human chỉ dùng sau judge để đối chiếu.}}
-
-Cohen’s κ: {{giá trị}}.
-Observed/chance agreement và diễn giải: {{phép tính và nhận xét}}.
+Chưa có 10 binary judgments live nên Cohen's kappa, observed agreement, chance
+agreement và các case bất đồng với người chấm đều chưa đo. Unit tests chỉ xác
+nhận công thức với các vector nhãn kiểm soát, không thay thế calibration thật.
 
 ## Giới hạn và cách dùng judge
 
-{{Nêu model/prompt, số cặp và số nhãn nhỏ; diễn giải nếu κ chưa đạt >0.6.
-Nêu case lệch với human, cách kiểm chứng, và việc không xem judge là đáp án tuyệt đối.}}
+Mẫu chỉ gồm năm cặp pairwise và mười câu calibration, vì vậy ngay cả sau khi có
+kết quả cũng cần đọc từng reasoning thay vì xem judge là đáp án tuyệt đối.
+Position inconsistency chỉ là dấu hiệu tương quan với vị trí; verbosity win rate
+không chứng minh độ dài gây ra winner. Khi có key hợp lệ, chạy
+`python scripts/run_experiments.py --phase b --live`, kiểm tra provenance trong
+JSON rồi thay phần “chưa đo” bằng dữ liệu tạo ra từ batch đó.
+
