@@ -1,60 +1,76 @@
 # Blueprint CI/CD cho RAG và guardrails
 
-Nhóm: {{Tên nhóm}}
+Nhóm: VD
 
-Người phụ trách: {{Họ tên và MSSV}}
+Người phụ trách: Nguyễn Quang Duy, MSSV 2A202602426
 
-Đây là **đề xuất CI/CD**, không phải workflow đã được triển khai/chạy.
-Nguồn kết quả: artifacts/ragas_50q.json, judge_results.json, guard_results.json.
-Run timestamp: {{created_at}}; guard models: {{metadata.models.guard}}.
-Models generation/evaluator/judge từ A/B: {{models theo từng vai trò và nguồn report}}.
+Đây là đề xuất CI/CD, không phải workflow đã được triển khai hoặc chạy. Source
+Tasks 5–12 đã hoàn thiện và qua unit tests offline. Các batch live A/B/C chưa
+hoàn thành vì API key hết hạn; do đó chưa có timestamp, artifact live hoặc số đo
+để công bố. Generation source hiện có ghi model `openai/gpt-4o-mini`; evaluator,
+judge và guard model chỉ được xác nhận sau một lượt runner thành công.
 
 ## Kiến trúc và failure action
 
-Input → Presidio → NeMo input → RAG → NeMo output → response.
-Request thực dừng sớm khi bị chặn; khác phép đo input layers chạy đủ hai tầng.
+Luồng đề xuất là Input → Presidio → NeMo input → RAG → NeMo output → Response.
+Request thực dừng sớm khi Presidio phát hiện PII hoặc NeMo input rail chặn. PII
+được redact trong log; raw input/output nhạy cảm không được ghi vào telemetry.
+Nếu RAG hoặc provider lỗi, hệ thống trả thông báo lỗi an toàn thay vì tự tạo câu
+trả lời không có context. Output rail thay câu trả lời bị chặn bằng response của
+rail và giữ nguyên câu trả lời sạch.
 
-{{Mô tả data flow, failure action, log/redact, nơi giữ secrets và điều kiện fallback.}}
+Secrets được đưa qua secret manager của môi trường chạy, không nằm trong source,
+artifact hoặc log. CI chỉ chạy unit tests không mạng; job live dùng environment
+được bảo vệ và cần phê duyệt để tránh chi phí ngoài ý muốn.
 
 ## Phạm vi và số đo latency
 
-Bắt buộc Task 12: **input_layers_sequential**, Presidio + NeMo input, không
-short-circuit. Engines tạo trước đo; có hai warm-up thật không tính vào mẫu.
-Percentile nội suy tuyến tính từ raw samples; tổng từ tổng từng sample.
-
-Số mẫu timed: {{n_samples}}; warm-up: {{warmup_runs}};
-phương pháp: {{percentile_method}}.
+Task 12 đo `input_layers_sequential`: Presidio và NeMo input luôn được gọi tuần
+tự, không short-circuit. Engines được dựng trước khi đo, hai lượt warm-up thật bị
+loại, và percentile dùng nội suy tuyến tính từ tổng của từng raw sample.
 
 | Layer / scope | P50 ms | P95 ms | P99 ms | Tình trạng |
-|---|---|---|---|---|
-| Presidio | {{p50}} | {{p95}} | {{p99}} | {{Kết quả đo Task 12}} |
-| NeMo input | {{p50}} | {{p95}} | {{p99}} | {{Kết quả đo Task 12}} |
-| Input guard sequential | {{p50}} | {{p95}} | {{p99}} | {{Kết quả đo Task 12}} |
+|---|---:|---:|---:|---|
+| Presidio | chưa đo | chưa đo | chưa đo | Chờ batch live |
+| NeMo input | chưa đo | chưa đo | chưa đo | Chờ batch live |
+| Input guard sequential | chưa đo | chưa đo | chưa đo | Chờ batch live |
 | RAG | chưa đo | chưa đo | chưa đo | Ngoài phạm vi bắt buộc |
 | NeMo output | chưa đo | chưa đo | chưa đo | Ngoài phạm vi bắt buộc |
-| Full guard / short-circuit request | chưa đo | chưa đo | chưa đo | Không suy từ input_guard_ms |
+| Full guard / short-circuit request | chưa đo | chưa đo | chưa đo | Không suy từ input guard |
 
-Input-layer budget target: 500ms; kết quả thực tế/budget_ok: {{giá trị và bool}}.
-{{Nêu bottleneck nếu vượt target. Nếu chưa đo các phần ngoài phạm vi, giữ “chưa đo”
-và nêu kế hoạch lấy mẫu/warm-up/timestamps; nếu đã đo thì thay bằng số và phương pháp.}}
+Target input-layer P95 là 500 ms nhưng `latency_budget_ok` chưa xác định khi chưa
+có mẫu. Sau khi có key, cần lấy ít nhất 20 mẫu timed sau hai warm-up. Muốn đo RAG,
+output và full request phải tạo benchmark riêng, ghi timestamp ở ranh giới từng
+stage và phân tầng blocked/allowed để không trộn hai đường chạy.
 
 ## CI gates đề xuất
 
-- RAGAS faithfulness ≥0.75, avg_score ≥0.65 trên 50 câu.
-- Attacks ≥18/20 cho CI đề xuất; clean 8/8 allowed; output cases đúng.
-- Full guard P95 <500ms chỉ áp dụng sau khi thực sự đo full guard.
+- Job offline: cài test lockfile, chạy `python -m pytest tests/ -m "not integration" -q`.
+- Job eval được phê duyệt: chạy Phase A và yêu cầu faithfulness ≥0.75,
+  `avg_score` ≥0.65 trên đủ 50 câu.
+- Job guard được phê duyệt: yêu cầu attacks ≥18/20, clean 8/8 allowed và cả bốn
+  output cases đúng. Mốc bắt buộc của lab vẫn là attacks ≥15/20.
+- Chỉ áp dụng gate full-guard P95 <500 ms sau khi thực sự đo full request; không
+  dùng `input_guard_ms` để đại diện cho chỉ số này.
+- Mỗi gate phải validate schema/provenance trước khi đọc metric và trả exit code
+  khác 0 khi thiếu artifact, stale hash hoặc không đạt ngưỡng.
 
-Mốc bắt buộc lab vẫn attacks ≥15/20; bonus ≥18/20 kèm clean controls đạt.
-{{Đề xuất lệnh job và cách script trả nonzero khi không đạt. MIN_* là biến đề
-xuất, không tự làm quality gate nếu runner chưa kiểm tra ngưỡng. Ghi rõ workflow
-chưa triển khai, hoặc dẫn bằng chứng nếu nhóm thực sự đã triển khai.}}
+Các mục trên là thiết kế đề xuất; repository chưa có workflow live đã chạy và
+các biến `MIN_*` tự thân không tạo quality gate.
 
 ## Monitoring và cải tiến
 
-{{Nêu metric, ngưỡng cảnh báo, cách lấy samples, xử lý false positives, drift,
-privacy và người xử lý. Dùng kết quả thật và ghi giới hạn của bộ 50/20/8/4.}}
+Production monitoring nên theo dõi tỷ lệ block theo category, false-positive
+rate trên clean canary, P50/P95/P99 từng layer, lỗi provider, RAGAS theo
+distribution và drift của query. Cảnh báo khi clean false-positive vượt 1%,
+attack pass rate giảm dưới gate hoặc input P95 vượt 500 ms trong hai cửa sổ liên
+tiếp. Chỉ lưu nội dung đã redact; raw PII cần bị loại hoặc mã hóa với thời hạn lưu
+ngắn và quyền truy cập có audit.
 
-RAGAS mean/worst distribution: {{giá trị}}.
-Cohen’s κ: {{giá trị}}.
-Attacks passed: {{số lượng}}/20; clean false_positive_rate: {{giá trị}}.
-{{Nêu 3–5 câu cải tiến có thể kiểm tra, gắn với bằng chứng của nhóm.}}
+Kết quả RAGAS mean/worst distribution, Cohen's kappa, attacks passed và clean
+false-positive rate hiện chưa đo. Sau khi có key hợp lệ, nhóm cần chạy ba phase,
+đọc các case yếu/bất đồng/chặn nhầm, điều chỉnh prompt hoặc policy trên tập phát
+triển, rồi chạy lại toàn bộ tập cố định đúng một lần để tránh chọn lọc kết quả.
+Bộ 50/20/8/4 nhỏ nên cần bổ sung regression từ incident thực tế, versioned policy
+cases, multilingual attacks và canary theo từng phiên bản model.
+
