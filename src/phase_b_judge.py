@@ -39,37 +39,42 @@ def pairwise_judge(question: str, answer_a: str, answer_b: str, reference: str =
     Returns:
         {"winner": "A"|"B"|"tie", "reasoning": str, "scores": {"A": float, "B": float}}
     """
-    # TODO: Implement
-    # PROMPT_TEMPLATE = '''Bạn là một expert đánh giá chất lượng câu trả lời RAG.
-    #
-    # Câu hỏi: {question}
-    # Chính sách/đáp án tham chiếu: {reference}
-    #
-    # Answer A:
-    # {answer_a}
-    #
-    # Answer B:
-    # {answer_b}
-    #
-    # Đánh giá dựa trên 3 tiêu chí: độ chính xác, đầy đủ, súc tích.
-    # Trả lời JSON (chỉ JSON, không text khác):
-    # {{"winner": "A" hoặc "B" hoặc "tie", "reasoning": "giải thích ngắn gọn", "scores": {{"A": 0.0-1.0, "B": 0.0-1.0}}}}
-    # '''
-    #
-    # from openai import OpenAI
-    # client = OpenAI()
-    # resp = client.chat.completions.create(
-    #     model=JUDGE_MODEL,
-    #     messages=[
-    #         {"role": "system", "content": "Bạn là expert đánh giá RAG. Chỉ trả lời JSON."},
-    #         {"role": "user",   "content": PROMPT_TEMPLATE.format(
-    #             question=question, answer_a=answer_a, answer_b=answer_b,
-    #             reference=reference)},
-    #     ],
-    #     response_format={"type": "json_object"},
-    # )
-    # return json.loads(resp.choices[0].message.content)
-    return {"winner": "tie", "reasoning": "", "scores": {"A": 0.0, "B": 0.0}}
+    prompt = f"""Bạn là chuyên gia đánh giá chất lượng câu trả lời RAG.
+
+Câu hỏi: {question}
+Chính sách/đáp án tham chiếu: {reference}
+
+Answer A:
+{answer_a}
+
+Answer B:
+{answer_b}
+
+Đánh giá dựa trên độ chính xác so với tham chiếu, độ đầy đủ và tính súc tích.
+Không ưu tiên câu trả lời vì vị trí hoặc độ dài. Trả lời duy nhất một JSON:
+{{"winner":"A|B|tie","reasoning":"giải thích ngắn gọn","scores":{{"A":0.0,"B":0.0}}}}
+"""
+    from openai import OpenAI
+
+    response = OpenAI().chat.completions.create(
+        model=JUDGE_MODEL,
+        messages=[
+            {"role": "system", "content": "Bạn là expert đánh giá RAG. Chỉ trả lời JSON hợp lệ."},
+            {"role": "user", "content": prompt},
+        ],
+        response_format={"type": "json_object"},
+    )
+    result = json.loads(response.choices[0].message.content)
+    if result.get("winner") not in {"A", "B", "tie"}:
+        raise ValueError("Judge winner must be A, B, or tie.")
+    if not isinstance(result.get("reasoning"), str) or not result["reasoning"].strip():
+        raise ValueError("Judge reasoning must be a non-empty string.")
+    scores = result.get("scores")
+    if not isinstance(scores, dict) or set(scores) != {"A", "B"}:
+        raise ValueError("Judge scores must contain exactly A and B.")
+    if any(type(value) not in (int, float) or not 0 <= value <= 1 for value in scores.values()):
+        raise ValueError("Judge scores must be numeric values in [0, 1].")
+    return result
 
 
 # ─── Task 6: Swap-and-Average ─────────────────────────────────────────────────
@@ -87,35 +92,19 @@ def swap_and_average(question: str, answer_a: str, answer_b: str, reference: str
         Final:   nếu winner_1 == winner_2 → final = winner_1
                  nếu khác nhau → final = "tie"
     """
-    # TODO: Implement
-    # pass1 = pairwise_judge(question, answer_a, answer_b, reference=reference)
-    # pass2_raw = pairwise_judge(question, answer_b, answer_a, reference=reference)  # SWAP!
-    #
-    # # Convert pass2 back to original A/B space
-    # swap_map = {"A": "B", "B": "A", "tie": "tie"}
-    # winner_pass2 = swap_map[pass2_raw["winner"]]
-    #
-    # # Average: consensus only if both agree
-    # if pass1["winner"] == winner_pass2:
-    #     final = pass1["winner"]
-    # else:
-    #     final = "tie"  # disagreement = inconclusive
-    #
-    # position_consistent = (pass1["winner"] == winner_pass2)
-    #
-    # return JudgeResult(
-    #     question=question, answer_a=answer_a, answer_b=answer_b,
-    #     winner_pass1=pass1["winner"], winner_pass2=winner_pass2,
-    #     final_winner=final,
-    #     reasoning_pass1=pass1["reasoning"], reasoning_pass2=pass2_raw["reasoning"],
-    #     position_consistent=position_consistent,
-    #     scores_pass1=pass1["scores"],
-    #     scores_pass2={"A": pass2_raw["scores"]["B"], "B": pass2_raw["scores"]["A"]},
-    # )
+    pass1 = pairwise_judge(question, answer_a, answer_b, reference=reference)
+    pass2_raw = pairwise_judge(question, answer_b, answer_a, reference=reference)
+    winner_pass2 = {"A": "B", "B": "A", "tie": "tie"}[pass2_raw["winner"]]
+    consistent = pass1["winner"] == winner_pass2
+
     return JudgeResult(
         question=question, answer_a=answer_a, answer_b=answer_b,
-        winner_pass1="tie", winner_pass2="tie", final_winner="tie",
-        reasoning_pass1="", reasoning_pass2="", position_consistent=True,
+        winner_pass1=pass1["winner"], winner_pass2=winner_pass2,
+        final_winner=pass1["winner"] if consistent else "tie",
+        reasoning_pass1=pass1["reasoning"], reasoning_pass2=pass2_raw["reasoning"],
+        position_consistent=consistent,
+        scores_pass1=pass1["scores"],
+        scores_pass2={"A": pass2_raw["scores"]["B"], "B": pass2_raw["scores"]["A"]},
     )
 
 
@@ -145,8 +134,18 @@ def cohen_kappa(judge_labels: list[int], human_labels: list[int]) -> float:
         κ = (p_o - p_e) / (1 - p_e) if p_e != 1 else 0
         return κ
     """
-    # TODO: Implement
-    return 0.0
+    if len(judge_labels) != len(human_labels) or not judge_labels:
+        raise ValueError("Judge and human labels must be non-empty and have equal length.")
+    if any(type(label) is not int or label not in (0, 1)
+           for label in judge_labels + human_labels):
+        raise ValueError("Cohen kappa only accepts integer labels 0 and 1.")
+    n = len(judge_labels)
+    observed = sum(judge == human for judge, human in zip(judge_labels, human_labels)) / n
+    chance = sum(judge_labels.count(label) * human_labels.count(label) / n**2
+                 for label in (0, 1))
+    if chance == 1:
+        return 1.0 if observed == 1 else 0.0
+    return (observed - chance) / (1 - chance)
 
 
 # ─── Task 8: Bias Report ──────────────────────────────────────────────────────
@@ -174,38 +173,33 @@ def bias_report(judge_results: list[JudgeResult]) -> dict:
           "interpretation": str,
         }
     """
-    # TODO: Implement
-    # total = len(judge_results)
-    # if total == 0:
-    #     return {"total_judged": 0, "position_bias_rate": 0.0, "verbosity_bias": 0.0}
-    #
-    # position_bias_count = sum(1 for r in judge_results if not r.position_consistent)
-    # position_bias_rate  = position_bias_count / total
-    #
-    # a_wins_a_longer = sum(
-    #     1 for r in judge_results
-    #     if r.final_winner == "A" and len(r.answer_a) > len(r.answer_b)
-    # )
-    # b_wins_b_longer = sum(
-    #     1 for r in judge_results
-    #     if r.final_winner == "B" and len(r.answer_b) > len(r.answer_a)
-    # )
-    # decisive = sum(1 for r in judge_results if r.final_winner != "tie")
-    # verbosity_bias = (a_wins_a_longer + b_wins_b_longer) / decisive if decisive > 0 else 0.0
-    #
-    # interpretation = ("Position bias cao — nên dùng swap-and-average."
-    #                   if position_bias_rate > 0.3 else "Position bias thấp — judge ổn định.")
-    # return {
-    #     "total_judged": total, "position_bias_rate": round(position_bias_rate, 3),
-    #     "position_bias_count": position_bias_count,
-    #     "verbosity_bias": round(verbosity_bias, 3),
-    #     "verbosity_details": {"a_wins_a_longer": a_wins_a_longer,
-    #                           "b_wins_b_longer": b_wins_b_longer,
-    #                           "total_decisive": decisive},
-    #     "interpretation": interpretation,
-    # }
-    return {"total_judged": 0, "position_bias_rate": 0.0, "verbosity_bias": 0.0,
-            "position_bias_count": 0, "verbosity_details": {}, "interpretation": ""}
+    total = len(judge_results)
+    position_count = sum(not row.position_consistent for row in judge_results)
+    a_longer = sum(row.final_winner == "A" and len(row.answer_a) > len(row.answer_b)
+                   for row in judge_results)
+    b_longer = sum(row.final_winner == "B" and len(row.answer_b) > len(row.answer_a)
+                   for row in judge_results)
+    decisive = sum(row.final_winner != "tie" for row in judge_results)
+    position_rate = position_count / total if total else 0.0
+    verbosity_rate = (a_longer + b_longer) / decisive if decisive else 0.0
+    if not total:
+        interpretation = "Chưa có cặp nào để đánh giá position hoặc verbosity bias."
+    elif position_rate > 0.3:
+        interpretation = "Position inconsistency cao; cần giữ swap-and-average và kiểm tra thủ công."
+    else:
+        interpretation = "Position inconsistency thấp; vẫn cần đọc nội dung trước khi kết luận judge đáng tin cậy."
+    return {
+        "total_judged": total,
+        "position_bias_rate": round(position_rate, 3),
+        "position_bias_count": position_count,
+        "verbosity_bias": round(verbosity_rate, 3),
+        "verbosity_details": {
+            "a_wins_a_longer": a_longer,
+            "b_wins_b_longer": b_longer,
+            "total_decisive": decisive,
+        },
+        "interpretation": interpretation,
+    }
 
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
@@ -213,3 +207,4 @@ def bias_report(judge_results: list[JudgeResult]) -> dict:
 if __name__ == "__main__":
     from scripts.run_experiments import main
     raise SystemExit(main(["--phase", "b", *sys.argv[1:]]))
+
