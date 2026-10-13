@@ -10,15 +10,16 @@ Ngày lab/deadline áp dụng: 2026-10-12, Asia/Ho_Chi_Minh (UTC+07:00). Deadlin
 
 Commit dùng để chấm: chưa commit bản nộp.
 
-Mỗi nhóm nộp một repo. Hiện mới có một mục INDIVIDUAL cho phần đã làm. Teammate thêm hàng của mình khi làm Phase B và Phase C.
+Mỗi nhóm nộp một repo. Nhóm gồm hai thành viên; Phase B và Phase C do Nguyễn Quang Duy tiếp tục triển khai sau phần chuẩn bị và Phase A của Lê Văn Việt.
 
 ## Thành viên và phân công
 
 | STT | Họ và tên   | MSSV | Vai trò / công việc thật | Bằng chứng |
 |---|-------------|---|---|---|
 | 1 | Lê Văn Việt | 2A202602504 | Chuẩn bị pipeline, sinh 50 answers, Phase A Tasks 1–4 | `src/m1_chunking.py` đến `src/m5_enrichment.py`, `src/phase_a_ragas.py`, `artifacts/answers_50q.json`, `tests/test_phase_a.py` |
+| 2 | Nguyễn Quang Duy | 2A202602426 | Phase B Tasks 5–8, Phase C Tasks 9a–12, kiểm thử và tích hợp báo cáo | `src/phase_b_judge.py`, `src/phase_c_guard.py`, kết quả unit tests; artifacts và báo cáo live sẽ bổ sung sau khi API key hợp lệ |
 
-Người tích hợp/chạy batch/nộp link: Le Van Viet đã chạy setup và batch Phase A trên máy này. Batch Phase A chưa tạo `artifacts/ragas_50q.json` vì OpenRouter hết credit. Link nộp chưa gửi.
+Người tích hợp/chạy batch/nộp link: Lê Văn Việt đã chạy setup và thử batch Phase A; Nguyễn Quang Duy hoàn thiện source Phase B/C và kiểm thử offline. Phase A dừng vì OpenRouter hết credit; key cung cấp cho lượt tiếp theo đã hết hạn nên B/C chưa chạy live. Link nộp chưa gửi.
 
 ## Môi trường và chuẩn bị trước lớp
 
@@ -37,6 +38,16 @@ Models/Qdrant/50 answers đã chuẩn bị: Qdrant `qdrant/qdrant:v1.9.7` trên 
 - Giới hạn/cách xử lý: hai PDF scan, `BCTC.pdf` và nghị định 13, không có text layer nên bị bỏ qua. OpenRouter trả 402 khi RAGAS đang chạy, nên không có `artifacts/ragas_50q.json`. Không điền số metric khi chưa có file đó.
 - Nguồn/AI hỗ trợ nếu có: pipeline lấy từ bài Day 18 của Le Van Viet. Grok hỗ trợ lắp môi trường, sửa tương thích Qdrant/OpenRouter và viết Tasks 1–4. Số đo generation đối chiếu với `artifacts/answers_50q.json`. Số RAGAS chưa có để kiểm chứng.
 
+### NguyenQuangDuy-2A202602426
+
+- Phần được giao và phần thực tế đã làm: tiếp quản Phase B và Phase C; triển khai pairwise judge, swap-and-average, Cohen's kappa, phân tích position/verbosity bias, quét PII, input/output rails, adversarial suite và phép đo latency theo phạm vi `input_layers_sequential`.
+- Bằng chứng: `src/phase_b_judge.py`, `src/phase_c_guard.py`; toàn bộ 86 unit tests offline đạt trên Python 3.11.9. Các hàm dùng dependency injection nên tests không gọi mạng, model hoặc API.
+- Cách kiểm tra: `.venv\\Scripts\\python.exe -m pytest tests/ -m "not integration" -q --tb=short`. Đã xác nhận Presidio khởi tạo được với `en_core_web_lg` 3.8.0 và NeMo 0.10.0 đọc được cấu hình khi có biến môi trường API.
+- Điều đã học: pairwise winner và nhãn calibration 0/1 là hai phép đánh giá khác nhau; swap pass thứ hai phải đổi winner và scores về không gian A/B ban đầu. Latency bắt buộc đo tuần tự cả Presidio và NeMo input sau hai lượt warm-up, không đại diện cho full request.
+- Giới hạn/cách xử lý: API key được cung cấp trả lỗi `expired_secret_key`, nên chưa tạo artifact live hoặc điền số liệu báo cáo giả. Cần thay bằng key hợp lệ, sau đó chạy lại A/B/C và checker trước khi nộp.
+- Nguồn/AI hỗ trợ nếu có: Codex hỗ trợ đọc đặc tả, triển khai Tasks 5–12, dựng môi trường Windows và chạy unit tests. Mọi artifact live sẽ được đối chiếu trực tiếp với JSON do runner tạo.
+
 ## Cập nhật sau khi nộp
 
 Chưa nộp. Không có cập nhật sau deadline.
+
